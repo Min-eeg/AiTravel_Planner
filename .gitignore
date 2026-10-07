@@ -41,3 +41,5 @@ dist/
 __pycache__/
 .tool-output/
 memory/traces/
+# ===== 本地绘图脚本（生成的 PNG 已入库，脚本不上传）=====
+gen_readme_assets.py
