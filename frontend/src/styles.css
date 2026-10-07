@@ -1,0 +1,45 @@
+/* 全局基础样式：跟随 IDE 主题变量，保证明暗模式下都可读。 */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei', sans-serif);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text-primary, #2c2c2a);
+  background: var(--color-background-tertiary, #fafaf8);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 尊重系统深色偏好：图表背景与卡片用变量，随主题切换 */
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #1a1a19;
+    color: #e8e6e0;
+  }
+}
+
+/* 滚动条：低调处理，不抢视觉 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.28);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.45);
+}

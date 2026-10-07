@@ -1,0 +1,27 @@
+{
+  "name": "tuce-zhiyou-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "途策智游 · 基于 LangGraph 多阶段编排的 AI 行程规划前端",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@amap/amap-jsapi-loader": "^1.0.1",
+    "pinia": "^2.2.6",
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@esbuild/win32-x64": "^0.28.2",
+    "@rollup/rollup-win32-x64-msvc": "^4.64.0",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vue-tsc": "^2.1.10"
+  }
+}

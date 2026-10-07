@@ -1,0 +1,43 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===== 环境变量（含密钥，绝不提交）=====
+.env
+.env.local
+
+# ===== 数据与产物 =====
+*.db
+*.sqlite3
+eval_report.json
+report.json
+
+# ===== Node =====
+node_modules/
+dist/
+.vite/
+*.local
+
+# ===== 编辑器 =====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ===== 工作区辅助目录（非项目代码）=====
+.workbuddy/
+
+# ===== 本地遗留的虚拟环境备份 =====
+.venv_py313_old/
+.venv_py314/
+
+# ===== Python 缓存目录 =====
+__pycache__/
+.tool-output/
+memory/traces/
