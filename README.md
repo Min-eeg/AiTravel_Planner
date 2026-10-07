@@ -62,7 +62,7 @@
 
 | 层 | 技术 |
 |---|---|
-| 前端 | Vue 3 + TypeScript + Vite · Pinia · Vue Router · 高德地图 JS API |
+| 前端 | Vue 3 + TypeScript + Vite · Pinia · Vue Router |
 | 后端 | FastAPI · LangGraph · LangChain · SQLAlchemy + SQLite · httpx |
 | RAG | BM25Retriever + MarkdownHeaderTextSplitter + Markdown 知识库 |
 | 外部服务 | 高德地图 Web 服务 API（POI / 地理编码）· 高德 JS API（路线底图）· Open-Meteo（天气，免费无需 Key） |
