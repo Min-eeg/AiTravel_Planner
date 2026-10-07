@@ -1,4 +1,4 @@
-# 🗺️ 途策智游 · AI 行程规划
+# 🗺️ 途策智游
 
 > **途**（路径）+ **策**（策略编排）+ **智**（智能）+ **游**（行程）
 > 基于 **LangGraph 多阶段编排 + LangChain 结构化输出 + RAG 知识库 + SSE 流式渲染** 的全栈旅行规划应用
@@ -6,14 +6,9 @@
 输入目的地与偏好，自动生成包含景点、三餐、住宿、交通、天气与预算的逐日行程。
 **行程按天流式下发**，前端边接收边渲染，配合高德地图与数据卡片让预算、天气、路线随生成过程同步生长。
 
-技术关键词：`LangGraph` `多阶段编排` `SSE 流式渲染` `RAG 知识库` `结构化输出`
-`坐标校正` `可插拔缓存` `评测闭环` `高德地图 JS API` `Pinia`
-
 ---
 
 ## 📸 效果展示
-
-> 实际运行截图，图片存放于 `assets/showcase/`
 
 ### 规划首页
 
@@ -67,7 +62,7 @@
 
 | 层 | 技术 |
 |---|---|
-| 前端 | Vue 3 + TypeScript + Vite · Pinia · Vue Router · 高德地图 JS API（无重量级图表库，数据可视化组件均为自绘） |
+| 前端 | Vue 3 + TypeScript + Vite · Pinia · Vue Router · 高德地图 JS API |
 | 后端 | FastAPI · LangGraph · LangChain · SQLAlchemy + SQLite · httpx |
 | RAG | BM25Retriever + MarkdownHeaderTextSplitter + Markdown 知识库 |
 | 外部服务 | 高德地图 Web 服务 API（POI / 地理编码）· 高德 JS API（路线底图）· Open-Meteo（天气，免费无需 Key） |
