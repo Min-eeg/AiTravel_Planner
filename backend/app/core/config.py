@@ -28,6 +28,18 @@ class Settings:
         # open-meteo（默认，免费无需 Key，按坐标查询）/ amap（需账号开通天气权限）
         self.weather_provider: str = os.getenv("WEATHER_PROVIDER", "open-meteo").lower()
 
+        # ===== MCP（Model Context Protocol）=====
+        # mcp_enabled：总开关；MCP server 连接失败时自动降级 REST 直连，不影响可用性
+        self.mcp_enabled: bool = os.getenv("MCP_ENABLED", "1") == "1"
+        # server 启动命令（JSON 数组字符串），需与 POI 检索工具名配套
+        self.mcp_server_command: str = os.getenv(
+            "MCP_SERVER_COMMAND", '["uvx", "amap-mcp-server"]'
+        )
+        # 用于 POI 检索的 MCP 工具名（amap-mcp-server 的地图搜索工具）
+        self.mcp_poi_tool: str = os.getenv("MCP_POI_TOOL", "maps_text_search")
+        # MCP 单次调用超时（秒）
+        self.mcp_timeout: float = float(os.getenv("MCP_TIMEOUT", "30"))
+
         # ===== 开关 =====
         self.rag_enabled: bool = os.getenv("RAG_ENABLED", "1") == "1"
         self.mock_mode: bool = os.getenv("MOCK_MODE", "0") == "1"
