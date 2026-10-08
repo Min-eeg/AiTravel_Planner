@@ -70,6 +70,9 @@ const globalIndex = computed(() => {
   return result
 })
 
+/** 从未发起过生成（无会话元数据）且不在生成中 —— 结果页整体空态 */
+const isEmpty = computed(() => !store.meta && !store.loading && !store.days.length)
+
 const mealLabel: Record<string, string> = {
   breakfast: '早餐',
   lunch: '午餐',
@@ -97,6 +100,15 @@ function dayCost(day: DayPlan): number {
 
 <template>
   <div class="result-page">
+    <!-- 空态：打开页面但从未生成过行程，不给一堆空面板 -->
+    <div v-if="isEmpty" class="empty-state">
+      <div class="empty-icon">🗺️</div>
+      <h2 class="empty-title">还未生成行程</h2>
+      <p class="empty-desc">填一张表，AI 帮你做一份逐日旅游规划</p>
+      <RouterLink to="/" class="empty-btn">去规划 →</RouterLink>
+    </div>
+
+    <template v-else>
     <!-- 顶部状态条 -->
     <header class="status-bar">
       <div class="status-left">
@@ -303,6 +315,7 @@ function dayCost(day: DayPlan): number {
       <p v-else-if="store.loading" class="empty">正在规划行程，请稍候…</p>
       <p v-else class="empty">尚未生成行程</p>
     </section>
+    </template>
   </div>
 </template>
 
@@ -311,6 +324,42 @@ function dayCost(day: DayPlan): number {
   max-width: 1400px;
   margin: 0 auto;
   padding: 20px 24px 60px;
+}
+.empty-state {
+  max-width: 420px;
+  margin: 90px auto 0;
+  padding: 44px 32px;
+  text-align: center;
+  border-radius: 14px;
+  border: 1px dashed var(--color-border-secondary, rgba(0, 0, 0, 0.18));
+  background: var(--color-background-secondary, #FAFBFD);
+}
+.empty-icon {
+  font-size: 40px;
+  line-height: 1;
+}
+.empty-title {
+  margin: 16px 0 0;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--color-text-primary, #2C2C2A);
+}
+.empty-desc {
+  margin: 8px 0 22px;
+  font-size: 13px;
+  color: #888780;
+}
+.empty-btn {
+  display: inline-block;
+  padding: 9px 22px;
+  font-size: 13.5px;
+  text-decoration: none;
+  border-radius: 8px;
+  background: #378ADD;
+  color: #fff;
+}
+.empty-btn:hover {
+  background: #185FA5;
 }
 .status-bar {
   display: flex;
