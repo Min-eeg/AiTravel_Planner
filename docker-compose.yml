@@ -1,0 +1,47 @@
+# 途策智游一键启动：docker compose up --build
+# 访问 http://localhost:5273（前端），后端 /docs 调试接口在 http://localhost:8030
+#
+# 前置条件：backend/.env 填好 LLM_API_KEY / AMAP_API_KEY（缺失也能跑，自动进 mock 模式）
+services:
+  backend:
+    build: ./backend
+    container_name: tuce-backend
+    ports:
+      - "8030:8030" # 直接暴露，方便访问 Swagger 调试
+    env_file:
+      # 复用本地配置；文件不存在也不报错（key 缺失走 mock 兜底）
+      - path: ./backend/.env
+        required: false
+    environment:
+      # 容器内没有 uvx，MCP 链路默认关闭，POI 检索自动降级 REST 直连。
+      # 三级降级链路在这里派上用场：MCP → REST → mock，关闭上层不影响服务
+      MCP_ENABLED: ${MCP_ENABLED:-0}
+      # SQLite 指到挂载卷：容器重建不丢已保存的行程历史
+      DB_PATH: /app/data/trip_planner.db
+    volumes:
+      - backend-data:/app/data
+    healthcheck:
+      # slim 镜像没有 curl，直接用 python 标准库探活
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/api/trip/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      # 高德 JS API Key 是浏览器端变量，vite 在构建时内联，必须作为构建参数传入
+      args:
+        VITE_AMAP_WEB_KEY: ${VITE_AMAP_WEB_KEY:-}
+    container_name: tuce-frontend
+    ports:
+      - "5273:80"
+    depends_on:
+      backend:
+        condition: service_healthy # 后端探活通过再启动前端
+    restart: unless-stopped
+
+volumes:
+  backend-data:

@@ -9,6 +9,7 @@
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -26,7 +27,10 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from ..core.config import get_settings
 
-DB_PATH = Path(__file__).resolve().parents[2] / "trip_planner.db"
+# 默认放在 backend/ 下；容器内通过 DB_PATH 指到挂载卷，重建容器不丢数据
+DB_PATH = Path(
+    os.getenv("DB_PATH", Path(__file__).resolve().parents[2] / "trip_planner.db")
+)
 
 
 class Base(DeclarativeBase):

@@ -219,6 +219,27 @@ uvicorn app.api.main:app --reload --port 8030
 > **没有 API Key 也能跑**：未配置 Key 时自动进入 mock 模式，
 > 用内置景点池 + 模板规划跑通完整链路，便于本地开发和 CI 自检。
 
+### 🐳 Docker 一键启动
+
+不想配环境的话，用 Docker Compose 把前后端一起拉起来：
+
+```bash
+# 前置：backend/.env 填好 Key（缺失也能跑，自动进 mock 模式）
+docker compose up --build
+```
+
+访问 `http://localhost:5273` 即前端；后端 Swagger 调试接口在 `http://localhost:8030/docs`。
+
+容器化时的几个设计决策：
+
+| 决策 | 原因 |
+|---|---|
+| 前端多阶段构建（node 构建 → nginx 托管） | 最终镜像只含静态文件，不含 node_modules 和源码 |
+| nginx 反代 `/api` 并**关闭缓冲** | SSE 流式必须关 `proxy_buffering`，否则事件被攒成一次性返回——和 vite dev 代理是同一个坑 |
+| 容器内默认 `MCP_ENABLED=0` | 容器里没有 uvx，起不了 MCP server；POI 检索沿三级降级链自动落到 REST 直连 |
+| 数据库路径用 `DB_PATH` 环境变量注入并挂载卷 | SQLite 写在容器层会随重建丢失，指到 named volume 后行程历史可持久化 |
+| 前端高德 Key 走 build arg | `VITE_` 前缀变量是 vite **构建时**内联的，运行时传环境变量无效 |
+
 ### 前端
 
 ```bash
@@ -260,6 +281,7 @@ npm run dev
 | `WEATHER_PROVIDER` | 天气数据源：`open-meteo` / `amap` | `open-meteo` |
 | `RAG_ENABLED` | 置 `0` 关闭知识库注入（做 A/B 对比） | `1` |
 | `MOCK_MODE` | 置 `1` 强制 mock | 自动（无 LLM Key 时） |
+| `DB_PATH` | SQLite 文件路径（容器内指到挂载卷） | `backend/trip_planner.db` |
 
 > MCP 依赖：`pip install mcp`（已列入 requirements.txt）。未安装或 server 不可用时自动降级 REST，不影响使用。
 
