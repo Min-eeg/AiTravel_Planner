@@ -8,7 +8,6 @@
 所有外部查询统一走缓存，避免重复消耗配额。
 """
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -101,7 +100,13 @@ class AmapService:
             return None
 
         if data.get("status") != "1":
-            logger.warning("高德接口 %s 返回异常：%s", path, data.get("info"))
+            info = data.get("info", "")
+            if "CUQPS" in info:
+                # 个人开发者 Key 默认 3 QPS，并发稍高就会触发；
+                # 调用方带退避重试，这里降为 INFO 避免刷屏
+                logger.info("高德限流（%s），等待重试：%s", info, path)
+            else:
+                logger.warning("高德接口 %s 返回异常：%s", path, info)
             return None
 
         cache.set(cache_key, data)
@@ -110,9 +115,14 @@ class AmapService:
     # ========== POI 搜索 ==========
 
     async def search_poi(
-        self, keywords: str, city: str, offset: int = 8
+        self, keywords: str, city: str, offset: int = 8, fallback_mock: bool = True
     ) -> List[Dict[str, Any]]:
-        """搜索 POI，返回归一化结果。失败降级到 mock 池。"""
+        """搜索 POI，返回归一化结果。失败降级到 mock 池。
+
+        fallback_mock=False 时失败返回空列表——用于坐标回查场景：
+        mock 池的坐标是假的，用它"校正"真实景点名会把坐标全变成同一个点
+        （实测踩坑：QPS 限流时 4 个博物馆坐标齐刷刷变成断桥坐标）。
+        """
         data = await self._get(
             "place/text",
             {
@@ -125,7 +135,7 @@ class AmapService:
         )
         if data and data.get("pois"):
             return [_normalize_poi(p) for p in data["pois"]]
-        return self._mock_poi(city, offset)
+        return self._mock_poi(city, offset) if fallback_mock else []
 
     def _mock_poi(self, city: str, offset: int) -> List[Dict[str, Any]]:
         """降级数据源：无 Key 或接口失败时使用。
@@ -169,16 +179,24 @@ class AmapService:
 
     # ========== 坐标校正 ==========
 
-    async def geocode_poi(self, name: str, city: str) -> Optional[Dict[str, float]]:
-        """按「景点名 + 城市」回查真实坐标。
+    async def lookup_poi(self, name: str, city: str) -> Optional[Dict[str, Any]]:
+        """按「景点名 + 城市」回查 POI 的完整归一化信息。
 
-        LLM 生成的经纬度基本不可信，这个方法是地图准确性的关键保障。
-        查不到返回 None，调用方保留原值即可，不阻断主流程。
+        一次请求同时带回坐标、照片、地址、票价——MCP 发现的候选只有名称
+        （实测该 server 返回精简结构，show_fields 被忽略），缺的都在这里补齐。
+        注意必须 fallback_mock=False：回查宁缺毋假，mock 池的假数据
+        曾经把 4 个真实博物馆的坐标齐刷刷变成同一个点。
         """
-        pois = await self.search_poi(keywords=name, city=city, offset=1)
-        if not pois:
+        pois = await self.search_poi(
+            keywords=name, city=city, offset=1, fallback_mock=False
+        )
+        return pois[0] if pois else None
+
+    async def geocode_poi(self, name: str, city: str) -> Optional[Dict[str, float]]:
+        """只取坐标的轻量版回查，供 correct_geo 节点使用。"""
+        first = await self.lookup_poi(name, city)
+        if not first:
             return None
-        first = pois[0]
         return {
             "longitude": float(first["longitude"]),
             "latitude": float(first["latitude"]),

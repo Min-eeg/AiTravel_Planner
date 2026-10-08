@@ -1,4 +1,4 @@
-"""行程规划编排器：基于 LangGraph 的状态图。
+"""行程规划编排器：基于 LangGraph 的**多智能体**状态图。
 
 为什么用 LangGraph 而不是手写编排：
 - 阶段间的状态传递、条件分支、断点恢复都是框架标准能力，
@@ -6,21 +6,28 @@
 - `astream(..., stream_mode="updates")` 直接给出"哪个节点产出了什么"，
   天然适配 SSE 渐进渲染——这是本项目流式能力的骨架
 
-图结构（同时执行的分支放在同一 superstep）：
+多 Agent 分工（每个 Agent 是图中的一个节点，职责单一、可独立替换）：
 
         ┌──────────────┐
-        │  parse_input │  约束抽取（LLM 解析自由文本）
+        │  parse_input │  约束 Agent（LLM 解析自由文本）
         └──────┬───────┘
                ▼
-   ╔═══════════════════════╗◄──┐
-   ║  retrieve (并行三路)    ║   │
-   ║  poi ∥ weather ∥ rag    ║   │
-   ╚═══════════╤═══════════╝   │
-               ▼               │
-        ┌──────────────┐        │ 条件边：还有天数未生成？
-        │  plan_day    ├────────┘ (loop)
+        ┌──────────────┐
+        │  scout_poi   │  景点侦察 Agent：LLM 生成搜索计划 → MCP 工具执行
         └──────┬───────┘
-               ▼ (全部天数完成)
+               ▼
+   ╔═══════════════════════╗
+   ║  retrieve (并行两路)    ║   天气 ∥ RAG 知识库
+   ╚═══════════╤═══════════╝
+               ▼
+        ┌──────────────┐
+        │  plan_day    │  行程规划 Agent（逐日循环）
+        └──────┬───────┘
+               ▼
+        ┌──────────────┐
+        │  review_day  │  行程评审 Agent：质检不合格打回 plan_day ⟲
+        └──────┬───────┘  （每天最多打回 1 次）
+               ▼ (全部天数通过评审)
         ┌──────────────┐
         │ correct_geo  │  真实 POI 坐标覆盖 LLM 编造值
         └──────┬───────┘
@@ -29,30 +36,19 @@
         │  finalize    │  预算结算 + 图表数据
         └──────────────┘
 
-容错：任一阶段抛错都会跳到 fallback 节点，产出模板行程并标记 degraded，
+容错：候选检索失败跳 fallback 节点，产出模板行程并标记 degraded，
 前端据此展示"降级提示"而不是白屏。
 """
 
 import logging
-from datetime import date, timedelta
-import operator
-from typing import Annotated, Any, AsyncIterator, Dict, List, Optional, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, Dict, List, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from ..core import events
-from ..core.config import get_settings
-from ..models.drafts import ConstraintsDraft, DayDraft
-from ..models.schemas import (
-    Attraction,
-    DayPlan,
-    Location,
-    Meal,
-    TripRequest,
-)
-from ..services.amap_service import get_amap_service
-from ..services.llm_service import LLMError, get_llm_service
-from ..services.rag_service import retrieve_knowledge
+from ..models.schemas import DayPlan, TripRequest
+
+if TYPE_CHECKING:
+    from .planner import TripPlanner
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +81,15 @@ class TripState(TypedDict, total=False):
 
     request: TripRequest
     constraints: Dict[str, Any]
+    # —— Scout Agent 产物 ——
+    search_plan: List[str]  # LLM 决策的搜索关键词（检索计划）
     candidates: List[Dict[str, Any]]
     weather: List[Dict[str, Any]]
     knowledge: str
+    # —— Reviewer Agent 产物 ——
+    review_verdict: str  # accept / reject（当天评审结论）
+    review_feedback: str  # 打回时给规划 Agent 的修改意见
+    day_retries: Dict[str, int]  # 每天已被打回的次数（key=str(day_index)）
     # 逐日累加，必须用 reducer 合并
     days: Annotated[List[DayPlan], _merge_days]
     day_pointer: int
@@ -130,163 +132,62 @@ CONSTRAINTS_PROMPT = """你是旅行需求解析专家。用户会给出目的�
 
 
 # ============ 节点实现 ============
-
-
-async def node_parse_input(state: TripState) -> Dict[str, Any]:
-    """阶段 0：把用户的自由文本解析为结构化约束。"""
-    request: TripRequest = state["request"]
-    llm = get_llm_service()
-
-    base = {
-        "pace": request.pace,
-        "budget_level": request.budget_level,
-        "interests": list(request.preferences),
-        "must_avoid": [],
-        "notes": "",
-    }
-
-    if not request.free_text or not llm.available:
-        return {"constraints": base}
-
-    try:
-        draft: ConstraintsDraft = await llm.structured(
-            CONSTRAINTS_PROMPT,
-            f"目的地：{request.city}\n天数：{request.days}天\n"
-            f"偏好标签：{'、'.join(request.preferences) or '无'}\n"
-            f"用户自由描述：{request.free_text}",
-            ConstraintsDraft,
-        )
-        return {
-            "constraints": {
-                "pace": draft.pace,
-                "budget_level": draft.budget_level,
-                "interests": draft.interests or list(request.preferences),
-                "must_avoid": draft.must_avoid,
-                "notes": draft.notes,
-            }
-        }
-    except LLMError as exc:
-        # 约束解析失败不影响主流程，用默认值继续
-        logger.warning("约束解析失败，使用默认值：%s", exc)
-        return {"constraints": base}
-
-
-async def node_retrieve(state: TripState) -> Dict[str, Any]:
-    """阶段 1：并行检索 POI / 天气 / RAG 知识库。
-
-    LangGraph 中同节点的三个分支并发执行，总耗时约等于最慢的一个。
-    """
-    import asyncio
-
-    request: TripRequest = state["request"]
-    settings = get_settings()
-    amap = get_amap_service()
-    constraints = state.get("constraints", {})
-
-    keywords = (constraints.get("interests") or request.preferences or ["景点"])[0]
-
-    async def fetch_poi() -> List[Dict[str, Any]]:
-        return await amap.search_poi(keywords, request.city, offset=10)
-
-    async def fetch_weather() -> List[Dict[str, Any]]:
-        return await amap.get_weather(request.city)
-
-    def fetch_knowledge() -> str:
-        if not settings.rag_enabled:
-            return ""
-        query_parts = [
-            request.city,
-            " ".join(constraints.get("interests") or request.preferences),
-            request.free_text,
-        ]
-        return retrieve_knowledge(request.city, " ".join(query_parts), top_k=4)
-
-    results = await asyncio.gather(
-        fetch_poi(),
-        fetch_weather(),
-        asyncio.to_thread(fetch_knowledge),
-        return_exceptions=True,
-    )
-
-    candidates = _unwrap(results[0], [], "POI 检索")
-    weather = _unwrap(results[1], [], "天气查询")
-    knowledge = _unwrap(results[2], "", "知识库检索")
-
-    if not weather:
-        try:
-            weather = await amap.get_weather(request.city)
-        except Exception:
-            weather = []
-
-    return {
-        "candidates": candidates,
-        "weather": weather,
-        "knowledge": knowledge,
-    }
-
-
-def node_plan_day(state: TripState) -> Dict[str, Any]:
-    """阶段 2：生成单日行程。由条件边控制循环次数。"""
-    # 实际实现在 TripPlanner._plan_one_day（需要 self 的 llm 实例）
-    raise NotImplementedError  # 由 build_graph 注入
-
-
-def node_correct_geo(state: TripState) -> Dict[str, Any]:
-    raise NotImplementedError  # 由 build_graph 注入
-
-
-def node_finalize(state: TripState) -> Dict[str, Any]:
-    raise NotImplementedError  # 由 build_graph 注入
-
-
-def node_fallback(state: TripState) -> Dict[str, Any]:
-    raise NotImplementedError  # 由 build_graph 注入
-
-
-def _unwrap(result: Any, fallback: Any, label: str) -> Any:
-    """gather(return_exceptions=True) 的结果解包。"""
-    if isinstance(result, BaseException):
-        logger.warning("%s 失败：%s", label, result)
-        return fallback
-    return result
+#
+# 各节点的真实实现绑定在 TripPlanner 实例上（见 planner.py），
+# build_graph 负责把它们装配进状态图。
 
 
 # ============ 图构建 ============
+
+# 评审打回的重试上限：超过后放行当天的结果，避免死循环拖垮整体耗时
+MAX_DAY_RETRIES = 1
 
 
 def build_graph(planner: "TripPlanner"):
     """构建 LangGraph 状态图。节点实现绑定到 planner 实例。"""
 
-    def should_continue(state: TripState) -> str:
-        """条件边：还有天数没生成就继续循环。"""
+    def after_review(state: TripState) -> str:
+        """条件边：评审打回则重做当天；否则按剩余天数决定继续循环还是收尾。
+
+        打回时 review_day 节点已把 day_pointer 指回当天，
+        plan_day 会带着 review_feedback 重新生成同一天。
+        """
         request: TripRequest = state["request"]
+        if state.get("review_verdict") == "reject":
+            return "plan_day"
         pointer: int = state.get("day_pointer", 0)
         return "plan_day" if pointer < request.days else "correct_geo"
 
     graph = StateGraph(TripState)
 
     graph.add_node("parse_input", planner._node_parse_input)
+    graph.add_node("scout_poi", planner._node_scout_poi)
     graph.add_node("retrieve", planner._node_retrieve)
     graph.add_node("plan_day", planner._node_plan_day)
+    graph.add_node("review_day", planner._node_review_day)
     graph.add_node("correct_geo", planner._node_correct_geo)
     graph.add_node("finalize", planner._node_finalize)
     graph.add_node("fallback", planner._node_fallback)
 
     graph.add_edge(START, "parse_input")
-    graph.add_edge("parse_input", "retrieve")
+    graph.add_edge("parse_input", "scout_poi")
+    graph.add_edge("scout_poi", "retrieve")
     graph.add_edge("retrieve", "plan_day")
-    # plan_day 之后按剩余天数决定继续循环还是进入校正
+    # 每天生成后先过评审 Agent，再决定打回 / 继续下一天 / 收尾
+    graph.add_edge("plan_day", "review_day")
     graph.add_conditional_edges(
-        "plan_day", should_continue, {"plan_day": "plan_day", "correct_geo": "correct_geo"}
+        "review_day",
+        after_review,
+        {"plan_day": "plan_day", "correct_geo": "correct_geo"},
     )
     graph.add_edge("correct_geo", "finalize")
     graph.add_edge("finalize", END)
 
-    # 任意阶段失败 → 兜底
+    # 侦察阶段拿不到候选景点 → 兜底
     graph.add_conditional_edges(
-        "retrieve",
-        lambda s: "fallback" if not s.get("candidates") else "plan_day",
-        {"fallback": "fallback", "plan_day": "plan_day"},
+        "scout_poi",
+        lambda s: "fallback" if not s.get("candidates") else "retrieve",
+        {"fallback": "fallback", "retrieve": "retrieve"},
     )
     graph.add_edge("fallback", END)
 

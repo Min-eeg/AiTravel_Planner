@@ -141,3 +141,43 @@ async def test_geocode_returns_none_for_unknown():
     assert result is None or isinstance(result, dict)
 
 
+@pytest.mark.asyncio
+async def test_lookup_poi_returns_full_info_with_photo(monkeypatch):
+    """POI 回查必须带回完整信息（坐标 + 照片 + 票价），照片升级为 https。
+
+    背景：MCP 发现的候选只有名称，REST 回查是补照片的唯一入口——
+    曾经只回传坐标导致整趟行程地图气泡全部无图。
+    """
+    from app.services import amap_service as mod
+    from app.services.amap_service import AmapService
+
+    async def fake_get(self, path, params):
+        assert path == "place/text"
+        return {
+            "status": "1",
+            "pois": [
+                {
+                    "name": "南宋德寿宫遗址博物馆",
+                    "address": "望江路228-264号",
+                    "location": "120.173,30.238",
+                    "biz_ext": {"ticket_price": "0"},
+                    "photos": [{"url": "http://store.is.autonavi.com/pic1.jpg"}],
+                }
+            ],
+        }
+
+    monkeypatch.setattr(mod.AmapService, "_get", fake_get)
+    service = AmapService()
+
+    info = await service.lookup_poi("南宋德寿宫遗址博物馆", "杭州")
+    assert info is not None
+    assert abs(info["longitude"] - 120.173) < 1e-6
+    assert abs(info["latitude"] - 30.238) < 1e-6
+    assert info["image_url"] == "https://store.is.autonavi.com/pic1.jpg"
+    assert info["address"] == "望江路228-264号"
+
+    # geocode_poi 是轻量封装，仍只取坐标（correct_geo 依赖此契约）
+    loc = await service.geocode_poi("南宋德寿宫遗址博物馆", "杭州")
+    assert set(loc.keys()) == {"longitude", "latitude"}
+
+

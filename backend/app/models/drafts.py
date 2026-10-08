@@ -152,3 +152,40 @@ class ConstraintsDraft(_DraftBase):
     notes: str = Field(
         default="", alias="其他约束", description="其他需要遵守的约束，没有则留空"
     )
+
+
+class SearchPlanDraft(_DraftBase):
+    """Scout Agent（景点侦察）的检索计划。
+
+    多智能体分工：Scout 不自己找景点，而是决定「用什么关键词去调工具」——
+    这是 Agent 的决策输出，真正的搜索由 MCP 工具 / REST 直连执行。
+    """
+
+    queries: List[str] = Field(
+        ...,
+        alias="搜索关键词",
+        description=(
+            "3-5 组高德 POI 搜索关键词，每组覆盖一个兴趣维度，"
+            '按优先级排序。格式示例：["博物馆", "历史古迹", "特色美食街"]'
+        ),
+    )
+
+
+class ReviewDraft(_DraftBase):
+    """Reviewer Agent（行程评审）的单日质检结论。"""
+
+    passed: bool = Field(
+        ...,
+        alias="是否合格",
+        description="当天行程是否合格，合格为 true",
+    )
+    problems: List[str] = Field(
+        default_factory=list,
+        alias="问题列表",
+        description="发现的问题，每条一句话，如「景点 A 与 B 相距过远」",
+    )
+    suggestion: str = Field(
+        default="",
+        alias="修改建议",
+        description="给规划 Agent 的修改建议，50 字以内",
+    )
