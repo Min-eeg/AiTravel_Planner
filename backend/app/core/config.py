@@ -2,10 +2,22 @@
 
 import os
 from functools import lru_cache
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# .env 统一放在项目根目录，后端 / 前端 / docker compose 共用一份，避免多处配置漂移。
+# 依次尝试两个位置（都找不到也不报错，容器里走 compose 注入的环境变量）：
+#   parents[3] = 项目根（本地开发：backend/app/core/config.py → 上溯三级）
+#   parents[2] = backend/（兼容旧布局）
+_ENV_CANDIDATES = (
+    Path(__file__).resolve().parents[3] / ".env",
+    Path(__file__).resolve().parents[2] / ".env",
+)
+for _candidate in _ENV_CANDIDATES:
+    if _candidate.is_file():
+        load_dotenv(_candidate)
+        break
 
 
 class Settings:

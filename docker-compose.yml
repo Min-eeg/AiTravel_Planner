@@ -13,8 +13,8 @@ services:
     ports:
       - "8030:8030" # 直接暴露，方便访问 Swagger 调试
     env_file:
-      # 复用本地配置；文件不存在也不报错（key 缺失走 mock 兜底）
-      - path: ./backend/.env
+      # 与前端、本地开发共用项目根目录这一份；文件不存在也不报错（key 缺失走 mock 兜底）
+      - path: ./.env
         required: false
     environment:
       # 容器内没有 uvx，MCP 链路默认关闭，POI 检索自动降级 REST 直连。

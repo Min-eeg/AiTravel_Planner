@@ -186,8 +186,7 @@ ai-trip-planner/
 │   ├── eval/                  # 评测闭环（用例集 / 指标 / 运行器）
 │   ├── tests/                 # pytest 单元测试
 │   ├── Dockerfile             # python:3.13-slim，非 root 运行
-│   ├── requirements.txt
-│   └── .env.example
+│   └── requirements.txt
 ├── frontend/
 │   ├── src/
 │   │   ├── views/             # Home（表单）/ Result（流式结果）/ History（历史）
@@ -199,7 +198,7 @@ ai-trip-planner/
 │   ├── nginx.conf             # 静态托管 + /api 反代（关 proxy_buffering 保 SSE）
 │   └── package.json
 ├── docker-compose.yml         # 前后端编排（healthcheck 依赖 + 数据卷）
-├── .env.example               # compose 构建参数（高德 JS Key / 镜像源）
+├── .env.example               # 唯一配置模板（后端 / 前端 / compose 共用）
 ├── .github/workflows/ci.yml   # CI：后端 pytest + 前端构建
 ├── assets/showcase/           # README 图片（架构图 / 运行截图）
 └── README.md
@@ -208,6 +207,19 @@ ai-trip-planner/
 ---
 
 ## 🚀 快速开始
+
+### 配置（三种启动方式共用一份）
+
+```bash
+cp .env.example .env            # 在项目根目录执行，填入自己的 Key
+```
+
+`.env` 只放**项目根目录一份**，三处共用：后端（`config.py` 显式加载）、
+前端（`vite.config.ts` 的 `envDir` 指向根目录）、docker compose（`env_file` + build args）。
+
+> 为了做到这一点，前端设置了 `envDir`、后端按路径查找 `.env`——
+> vite 和 python-dotenv 的默认行为都不满足「单一配置源」：vite 只读 frontend/ 下的，
+> 而 build arg 更是只能从根目录读。集中一份能避免"改了 A 忘了 B"的配置漂移。
 
 ### 后端
 
@@ -219,34 +231,33 @@ python -m venv .venv
 
 pip install -r requirements.txt
 
-cp .env.example .env            # 填入 LLM_API_KEY 与 AMAP_API_KEY
 uvicorn app.api.main:app --reload --port 8030
 ```
 
 > **没有 API Key 也能跑**：未配置 Key 时自动进入 mock 模式，
 > 用内置景点池 + 模板规划跑通完整链路，便于本地开发和 CI 自检。
+> 此时前端页面的地图区域会提示未配置 Key，不影响其他功能。
 
 ### 🐳 Docker 一键启动
 
 不想配环境的话，用 Docker Compose 把前后端一起拉起来：
 
 ```bash
-# 前置 1：backend/.env 填好 Key（缺失也能跑，自动进 mock 模式）
-# 前置 2：根目录 .env 填 VITE_AMAP_WEB_KEY（地图底图用），照着 .env.example 复制
-cp .env.example .env
+cp .env.example .env            # 同上，根目录一份配置
 docker compose up --build
 ```
 
 访问 `http://localhost:5273` 即前端；后端 Swagger 调试接口在 `http://localhost:8030/docs`。
 
-> **⚠️ 两个 `.env` 别搞混**：`backend/.env` 是后端**运行时**读的；
-> 根目录 `.env` 是给 **compose 构建参数**（`VITE_AMAP_WEB_KEY`、镜像源）用的。
-> compose 不会去读 `frontend/.env` 或 `backend/.env` 来填 build args——
-> 只填了 `frontend/.env` 的话，构建时 Key 是空的，页面会提示「地图加载失败」。
+> **为什么 `VITE_AMAP_WEB_KEY` 必须写在根目录 `.env`**：compose 的 build args
+> 只能从项目根目录的 `.env` 插值，它不会读子目录里的 env 文件。
+> 而 `VITE_` 变量是 vite **构建时**内联进产物的，运行时再注入无效——
+> 所以这个 Key 必须在构建阶段就传进去，否则页面提示「地图加载失败」。
 
-**国内构建加速**（默认走官方源，网络不通时传构建参数覆盖，不影响仓库本身）：
+**国内构建加速**（写在根目录 `.env` 里即可，或临时用环境变量覆盖）：
 
 ```bash
+# .env 中已含以下两行，不需要额外操作；命令行覆盖示例：
 PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
 NPM_REGISTRY=https://registry.npmmirror.com \
 docker compose up --build
@@ -281,8 +292,7 @@ Docker Hub 拉不动基础镜像时，在 Docker Desktop → Settings → Docker
 ```bash
 cd frontend
 npm install
-cp .env.example .env            # 填入 VITE_AMAP_WEB_KEY（路线图底图需要）
-npm run dev
+npm run dev                     # env 变量已在根目录 .env 配好，无需再复制
 ```
 
 访问 `http://localhost:5273`。开发代理已将 `/api` 转发到 `http://localhost:8030`。
@@ -303,6 +313,8 @@ npm run dev
 
 ## 🔑 环境变量
 
+全部变量集中写在**项目根目录的 `.env`**（模板见 `.env.example`），后端 / 前端 / compose 共用一份。
+
 | 变量 | 说明 | 缺省行为 |
 |---|---|---|
 | `LLM_API_KEY` | OpenAI 兼容接口 Key（通义/DeepSeek/OpenAI 均可） | 走模板兜底 |
@@ -318,6 +330,7 @@ npm run dev
 | `RAG_ENABLED` | 置 `0` 关闭知识库注入（做 A/B 对比） | `1` |
 | `MOCK_MODE` | 置 `1` 强制 mock | 自动（无 LLM Key 时） |
 | `DB_PATH` | SQLite 文件路径（容器内指到挂载卷） | `backend/trip_planner.db` |
+| `PIP_INDEX_URL` / `NPM_REGISTRY` | 构建镜像时的依赖源（仅 Docker 构建阶段生效） | 官方源 |
 
 > MCP 依赖：`pip install mcp`（已列入 requirements.txt）。未安装或 server 不可用时自动降级 REST，不影响使用。
 

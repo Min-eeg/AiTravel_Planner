@@ -4,6 +4,9 @@ import { fileURLToPath, URL } from 'node:url'
 
 export default defineConfig({
   plugins: [vue()],
+  // env 文件统一放在项目根目录，与后端 / docker compose 共用一份。
+  // vite 默认只读 frontend/ 下的 .env，不做向上查找，所以必须显式指定。
+  envDir: fileURLToPath(new URL('..', import.meta.url)),
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
