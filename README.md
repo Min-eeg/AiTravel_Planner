@@ -1,7 +1,7 @@
 # 🗺️ 途策智游
 
 > **途**（路径）+ **策**（策略编排）+ **智**（智能）+ **游**（行程）
-> 基于 **LangGraph 多阶段编排 + LangChain 结构化输出 + RAG 知识库 + SSE 流式渲染** 的全栈旅行规划应用
+> 基于 **LangGraph 多智能体编排 + MCP 工具调用 + LangChain 结构化输出 + RAG 知识库 + SSE 流式渲染** 的全栈旅行规划应用
 
 输入目的地与偏好，自动生成包含景点、三餐、住宿、交通、天气与预算的逐日行程。
 **行程按天流式下发**，前端边接收边渲染，配合高德地图与数据卡片让预算、天气、路线随生成过程同步生长。
@@ -30,11 +30,11 @@
 
 ## ✨ 项目亮点
 
-- 🧠 **LangGraph 多阶段编排** — 约束解析 → 并行检索 → 逐日生成 ⟲ → 坐标校正 → 预算结算，条件边控制循环与分支，每完成一天立即流式下发
-- ⚡ **SSE 流式体验** — 不等全部生成完，第 1 天行程完成即可见；trace 事件让 Agent 每步耗时前端可见
+- 🤖 **多智能体协作（LangGraph 状态图）** — 约束 Agent → **侦察 Agent**（生成检索计划）→ 规划 Agent（逐日生成）⟲ → **评审 Agent**（质检打回）⟲ → 坐标校正 → 预算结算，条件边控制循环与分支，每完成一天立即流式下发
+- 🔌 **MCP 工具调用 + REST 双链路** — 自研框架无关的 MCP 客户端接入高德 MCP 服务，**持久会话复用**（对比常见"每次调用 spawn 子进程"的实现），MCP 不可用时自动降级 REST 直连，主流程永不中断
+- ⚡ **SSE 流式体验** — 不等全部生成完，第 1 天行程完成即可见；trace 事件携带每个 Agent 的**真实耗时**（duration_ms），前端天然是一份执行性能剖面
 - 🎯 **结构化输出对齐中文模型** — schema 字段名用中文 alias 匹配 qwen-max 的语言习惯，解决"整份行程静默降级为模板"的隐性问题
 - 🗺️ **真实坐标校正** — LLM 生成的经纬度基本是编造的；按「景点名 + 城市」回查高德 POI 用真实坐标覆盖，地图定位准确
-- 📸 **真实景点照片** — 高德 POI 照片接口获取，地图标记即照片气泡，图文一致
 - 📚 **RAG 城市知识库** — BM25 检索 Markdown 攻略（闭馆日 / 预约 / 避坑），新增城市零改代码
 - 🌦️ **多源天气** — Open-Meteo 按景点坐标查询（比城市级更准），三级降级可切换
 - 🗂️ **行程历史持久化** — SQLite 存储 + 内容哈希去重，支持保存 / 查看 / 删除
@@ -45,14 +45,10 @@
 | 维度 | 常见做法 | 本项目 |
 |---|---|---|
 | 生成体验 | 一次请求等 5 分钟，期间白屏 | **SSE 逐日流式下发**，第 1 天完成即可见 |
-| 编排方式 | 提示词硬约束或多轮串行调用 | **LangGraph 状态图**，条件边控制循环与分支 |
-| 结构化输出 | 提示词里写"请只输出 JSON" | **`with_structured_output(Pydantic)`**，schema 级约束 |
-| 检索 | 向量数据库自建 | **LangChain BM25Retriever**，知识库新增城市零改代码 |
-| 坐标可信度 | 直接用 LLM 生成的经纬度 | **真实 POI 回查校正**，杜绝编造坐标 |
-| 天气数据 | 单一数据源，城市级精度 | **按景点真实坐标查询**，多数据源可切换 |
-| 可观测 | print 日志 | **trace 事件流**，前端可见每步耗时与降级状态 |
-| 质量 | 人工目测 | **8 项评测指标 + 用例集**，支持 A/B 与 CI 阈值 |
-| 持久化 | 无 | **行程历史落库 + 内容去重** |
+| 编排方式 | 提示词硬约束或多轮串行调用 | **多智能体状态图**：侦察 / 规划 / 评审各司其职，评审打回形成质量闭环 |
+| 工具调用 | REST 直连写死 | **MCP 协议接入**（工具自动发现），持久会话 + REST 自动降级 |
+| 候选检索 | 单关键词搜一次 | **Agent 生成多关键词检索计划**，多路并行 + 去重合并 |
+| 质量保障 | 人工目测 | **评审 Agent 硬规则 + LLM 双级质检**（编造景点检测 / 超时 / 避开项），打回重做有重试上限 |
 
 ---
 
@@ -63,25 +59,56 @@
 | 层 | 技术 |
 |---|---|
 | 前端 | Vue 3 + TypeScript + Vite · Pinia · Vue Router |
-| 后端 | FastAPI · LangGraph · LangChain · SQLAlchemy + SQLite · httpx |
+| 后端 | FastAPI · LangGraph 多智能体编排 · LangChain · SQLAlchemy + SQLite · httpx |
+| MCP | 自研 MCP 客户端（stdio 持久会话）· amap-mcp-server（高德 MCP 服务） |
 | RAG | BM25Retriever + MarkdownHeaderTextSplitter + Markdown 知识库 |
-| 外部服务 | 高德地图 Web 服务 API（POI / 地理编码）· 高德 JS API（路线底图）· Open-Meteo（天气，免费无需 Key） |
+| 外部服务 | 高德地图 Web 服务 API（POI / 地理编码，REST 降级链路）· 高德 JS API（路线底图）· Open-Meteo（天气，免费无需 Key） |
 | 测试 | pytest + pytest-asyncio |
 
 ### 系统架构
 
 ![系统架构](assets/showcase/architecture.png)
 
-### LangGraph 编排流程
+### 多智能体编排流程（LangGraph）
 
-![LangGraph 编排流程](assets/showcase/langgraph.png)
+![多智能体编排流程](assets/showcase/multi-agent.png)
 
-- **parse_input**：把用户的自然语言自由描述解析为结构化约束（节奏 / 预算 / 兴趣点 / 忌口）
-- **retrieve**：POI ∥ 知识库两路并行；天气在拿到景点坐标后按坐标查询（更精准）
-- **plan_day**：按天生成，条件边根据剩余天数决定是否循环；**每完成一天立即 yield 出去**
+- **parse_input（约束 Agent）**：把用户的自然语言自由描述解析为结构化约束（节奏 / 预算 / 兴趣点 / 忌口）
+- **scout_poi（侦察 Agent）**：LLM 生成多关键词检索计划（`SearchPlanDraft`）→ 每组关键词经 **MCP 工具**（优先）或 REST 直连（降级）并行搜索 → 按名称合并去重出候选池
+- **retrieve**：天气 ∥ 知识库两路并行；天气在拿到候选坐标后按坐标查询（更精准）
+- **plan_day（规划 Agent）**：按天生成，每完成一天立即流式下发；评审打回时修改意见注入提示词重做
+- **review_day（评审 Agent）**：单日质检——硬规则（编造景点检测 / 超 8 小时 / 缺餐次 / 违反避开项）+ LLM 体验评审；不合格打回 `plan_day`，每天最多打回 1 次，防死循环
 - **correct_geo**：用候选池中的真实经纬度覆盖 LLM 输出，查不到则保留原值
 - **finalize**：后端重算预算（不信任 LLM 给的总额），并把住宿 / 交通写回每一天
-- **fallback**：任何阶段失败都转入模板兜底，标记 `degraded`，前端展示提示而非白屏
+- **fallback**：候选检索失败等场景转入模板兜底，标记 `degraded`，前端展示提示而非白屏
+
+**MCP 双链路设计**：
+
+![MCP 双链路：发现走 MCP，坐标照片走 REST 回查](assets/showcase/mcp-dual-channel.png)
+
+| 环节 | 行为 |
+|---|---|
+| 会话管理 | **专职守护任务**持有会话：MCP 子进程全程只启动一次，进入/退出 anyio 上下文永远在同一个 asyncio Task 内（满足 mcp SDK 的 same-task 约束）；异常自动重建，应用退出统一清理 |
+| 工具发现 | `list_tools()` 自动发现并缓存，不写死工具名（`MCP_POI_TOOL` 可配） |
+| 降级策略 | mcp 包未安装 / server 启动失败 / 调用超时 → 自动切 REST 直连 → 仍失败用 mock 池 |
+| 结果解析 | 兼容原始高德结构与已归一化结构两种返回形态，解析失败不抛异常 |
+
+### MCP 实测记录（2026-10 真实联调）
+
+| 验证项 | 实测结果 |
+|---|---|
+| 工具发现 | `list_tools()` 自动发现 amap-mcp-server 的 **16 个工具**（含 maps_text_search / maps_weather 等） |
+| 检索计划 | LLM 依据兴趣生成 5 组关键词：`博物馆 / 历史文化街区 / 特色美食街 / 历史古迹 / 安静的公园` |
+| 检索链路 | trace 显示 `链路 mcp`，15 个候选全部来自 MCP 工具调用（真实 POI：南宋德寿宫遗址博物馆、杭州博物馆等） |
+| 坐标补全 | **14/15** 成功（1 个限流后如实保留缺省，由 correct_geo 节点二次兜底） |
+
+联调发现的三个真问题与修复（均已固化为代码与测试）：
+
+1. **参数类型坑**：amap-mcp-server 的 `citylimit` 要求字符串，传 bool 被 server 端 pydantic 直接拒绝 → 调用参数改为 `"true"`
+2. **坐标与照片缺失**：该 server 的搜索工具只返回 id/name/address（`show_fields` 被忽略）→ 引入「MCP 发现 + REST 回查补全」双链路分工；且回查一次请求同时带回坐标、**真实照片**、地址、票价（最初只回传坐标，导致整趟行程地图气泡全部无图——MCP 候选没有照片字段，REST 回查是补照片的唯一入口）
+3. **QPS 限流**：15 路并发补全触发 `CUQPS_HAS_EXCEEDED_THE_LIMIT`，且失败静默回退 mock 池导致多个景点坐标被污染成同一点 → 信号量压并发 + **请求节流 0.35s**（把节奏压在个人 Key 3 QPS 阈值以内，从"被拒再重试"变成"根本不触发"）+ 退避重试兜底，坐标回查一律 `fallback_mock=False`（宁缺毋假）
+
+> 实测数据均来自本地真实联调，复现脚本保留在本地（联调工具不入库），复现步骤：装好 `mcp` 包后在 `.env` 配好 `AMAP_API_KEY` 与 `LLM_API_KEY`，直接生成一次行程即可在 trace 中看到同等数据
 
 ### SSE 事件流
 
@@ -111,17 +138,20 @@
 
 在实现业务功能之外，重点解决了以下工程问题：
 
-1. **三段式容错链** — LLM 超时 → 重试；结构化输出校验失败 → 携带错误信息回传模型自我纠正；仍失败 → 降级模板计划并标记 `degraded`。原则是**绝不把异常抛给用户**
-2. **错误分级：可重试 vs 不可重试** — 超时/5xx/限流可重试；欠费、鉴权失败归为 `LLMUnavailableError` 立刻上抛，避免用户等几十秒只看到一句含糊的"生成失败"
-3. **坐标校正** — LLM 生成的经纬度基本是编造的；按「景点名 + 城市」回查高德 POI 用真实坐标覆盖，查不到保留原值不阻断流程
-4. **schema 字段名匹配模型语言习惯** — 实测 qwen-max 遇到英文 schema（`attractions`/`meals`）会按语义自造中文键（`{'景点': ...}`），导致**整份行程静默降级为模板**；解法是中文 `alias` + 提示词完整 JSON 示例 + `populate_by_name` + `extra="ignore"`
-5. **容忍结构偏差** — 模型会把三餐数组输出成 `{"breakfast":..., "lunch":...}` 对象形态；用 `Union[List, Dict]` + 归一化统一处理，覆盖 5 种实测形态
-6. **LangGraph reducer** — `days` 字段用自定义合并函数按 `day_index` 累积，否则第 N 天会覆盖前 N−1 天（逐日生成最容易踩的坑）
-7. **SSE 按事件名分派** — `done` 事件含 `days_generated`（整数），用 `'days' in payload` 判断会误判；统一走 `parse_sse_frames()`
-8. **结算数据两段拼合** — 流式 `day` 事件在结算前发出，天然没有住宿/交通；`chart` 事件在结算后携带完整逐日数据覆盖刷新，"先看到"与"补完整"两不误
-9. **可插拔缓存** — 高德查询缓存抽象为 `BaseCache` 接口，换 Redis 只替换全局实例，业务代码零改动
-10. **后端重算预算** — 不信任 LLM 给的总额，逐项由结构化数据累加并写回每一天，评测"预算一致"指标恒通过
-11. **克制的技术选型** — 图表曾用 ECharts，重构时发现 4 个数字用 525 KB 图表库不划算：环形图改为纯 CSS 条形分解卡，依赖整个移除，构建产物减少约 540 KB，构建时间 7s → 3s
+1. **MCP 持久会话（守护任务模式）** — 常见 MCP 集成每次工具调用都 spawn 子进程再销毁，一次行程开关进程十几次；本项目子进程全程只启动一次，异常自动重建，FastAPI lifespan 退出时统一清理。联调时踩到了 mcp SDK 的深层约束：`stdio_client` 的 anyio cancel scope **必须在进入它的同一个 asyncio Task 中退出**，跨任务关闭会抛 `Attempted to exit cancel scope in a different task` 并导致连接报废。最终方案是「专职守护任务」——由唯一后台任务负责连接的建立与销毁，业务任务通过事件握手使用会话，彻底规避该错误
+2. **多 Agent 质量闭环** — 评审 Agent 对每天行程做「硬规则 + LLM」双级质检：编造景点名检测（名称必须来自候选池）、超 8 小时、缺餐次、违反避开项；不合格打回规划 Agent 重做，修改意见注入提示词，每天重试上限 1 次防死循环；前端按 `day_index` upsert，打回重做的修正版原地替换、无重复卡片
+3. **检索计划 Agent 化** — 候选景点检索从「单关键词搜一次」升级为侦察 Agent 生成 3-5 组关键词（覆盖用户全部兴趣维度）并行检索、按优先级去重合并；无 LLM 时退化为确定性计划，mock 评测可跑
+4. **三段式容错链** — LLM 超时 → 重试；结构化输出校验失败 → 携带错误信息回传模型自我纠正；仍失败 → 降级模板计划并标记 `degraded`。原则是**绝不把异常抛给用户**
+5. **错误分级：可重试 vs 不可重试** — 超时/5xx/限流可重试；欠费、鉴权失败归为 `LLMUnavailableError` 立刻上抛，避免用户等几十秒只看到一句含糊的"生成失败"
+6. **坐标校正** — LLM 生成的经纬度基本是编造的；按「景点名 + 城市」回查高德 POI 用真实坐标覆盖，查不到保留原值不阻断流程
+7. **schema 字段名匹配模型语言习惯** — 实测 qwen-max 遇到英文 schema（`attractions`/`meals`）会按语义自造中文键（`{'景点': ...}`），导致**整份行程静默降级为模板**；解法是中文 `alias` + 提示词完整 JSON 示例 + `populate_by_name` + `extra="ignore"`
+8. **容忍结构偏差** — 模型会把三餐数组输出成 `{"breakfast":..., "lunch":...}` 对象形态；用 `Union[List, Dict]` + 归一化统一处理，覆盖 5 种实测形态
+9. **LangGraph reducer** — `days` 字段用自定义合并函数按 `day_index` 累积，否则第 N 天会覆盖前 N−1 天（逐日生成最容易踩的坑）
+10. **SSE 按事件名分派** — `done` 事件含 `days_generated`（整数），用 `'days' in payload` 判断会误判；统一走 `parse_sse_frames()`
+11. **结算数据两段拼合** — 流式 `day` 事件在结算前发出，天然没有住宿/交通；`chart` 事件在结算后携带完整逐日数据覆盖刷新，"先看到"与"补完整"两不误
+12. **可插拔缓存** — 高德查询缓存抽象为 `BaseCache` 接口，换 Redis 只替换全局实例，业务代码零改动
+13. **后端重算预算** — 不信任 LLM 给的总额，逐项由结构化数据累加并写回每一天，评测"预算一致"指标恒通过
+14. **克制的技术选型** — 图表曾用 ECharts，重构时发现 4 个数字用 525 KB 图表库不划算：环形图改为纯 CSS 条形分解卡，依赖整个移除，构建产物减少约 540 KB，构建时间 7s → 3s
 
 ### 真实模型联调踩的坑（mock 模式发现不了）
 
@@ -131,6 +161,7 @@
 | 行程全部降级为模板 | 中文模型不遵循英文 schema 字段名 | 字段加中文 `alias` + 提示词给完整示例 |
 | 三餐解析失败 | 模型输出对象而非数组 | `Union[List, Dict]` + 归一化 |
 | 显示「游览 2 分钟」 | 单位不明确，模型填了小时数 | schema 写明单位 + 后端 `_sane_duration()` 夹取 |
+| 每天吃一模一样的饭 | LLM 看不到前几天的产出，逐日生成时每天复制同一份菜单（实测北京 2 天都是护国寺小吃 + 烤鸭 + 炸酱面） | 前几日餐食注入提示词并禁止重复 + 评审 Agent 新增「跨天重复」硬规则（≥2 餐雷同打回） |
 
 > 这些偏差都已固化为单元测试（`tests/test_drafts.py`），防止后续换模型时静默回归。
 
@@ -142,13 +173,14 @@
 ai-trip-planner/
 ├── backend/
 │   ├── app/
-│   │   ├── agents/            # LangGraph 编排（graph 流程 / planner 节点实现）
+│   │   ├── agents/            # 多智能体编排（graph 流程 / planner：侦察·规划·评审节点实现）
 │   │   ├── api/routes/        # trip（SSE/非流式）· poi · history 路由
 │   │   ├── services/          # amap / llm / rag / weather 服务层
+│   │   ├── tools/             # mcp_client（自研 MCP 客户端，持久会话 + 降级）
 │   │   ├── core/              # config · cache（可插拔）· events（SSE 协议）
 │   │   ├── models/            # schemas（数据契约）· drafts（LLM 结构化 schema）
 │   │   ├── db/                # SQLAlchemy + SQLite 行程历史
-│   │   └── api/main.py        # FastAPI 入口
+│   │   └── api/main.py        # FastAPI 入口（lifespan 清理 MCP 会话）
 │   ├── data/kb/               # RAG 城市旅行知识库（Markdown）
 │   ├── eval/                  # 评测闭环（用例集 / 指标 / 运行器）
 │   ├── tests/                 # pytest 单元测试
@@ -219,11 +251,17 @@ npm run dev
 | `LLM_API_KEY` | OpenAI 兼容接口 Key（通义/DeepSeek/OpenAI 均可） | 走模板兜底 |
 | `LLM_BASE_URL` | 接口地址 | `https://api.openai.com/v1` |
 | `LLM_MODEL_ID` | 模型名 | `gpt-4o-mini` |
-| `AMAP_API_KEY` | 高德 Web 服务 Key（POI + 地理编码，服务端用） | 使用内置 mock 景点池 |
+| `AMAP_API_KEY` | 高德 Web 服务 Key（POI + 地理编码，服务端用；同时透传给 MCP server） | 使用内置 mock 景点池 |
 | `VITE_AMAP_WEB_KEY` | 高德 JS API Key（浏览器端路线图用） | 路线图提示未配置，不影响其他功能 |
+| `MCP_ENABLED` | 置 `0` 关闭 MCP 链路（POI 检索直接走 REST） | `1` |
+| `MCP_SERVER_COMMAND` | MCP server 启动命令（JSON 数组字符串） | `["uvx", "amap-mcp-server"]` |
+| `MCP_POI_TOOL` | 用于 POI 检索的 MCP 工具名 | `maps_text_search` |
+| `MCP_TIMEOUT` | MCP 单次调用超时（秒） | `30` |
 | `WEATHER_PROVIDER` | 天气数据源：`open-meteo` / `amap` | `open-meteo` |
 | `RAG_ENABLED` | 置 `0` 关闭知识库注入（做 A/B 对比） | `1` |
 | `MOCK_MODE` | 置 `1` 强制 mock | 自动（无 LLM Key 时） |
+
+> MCP 依赖：`pip install mcp`（已列入 requirements.txt）。未安装或 server 不可用时自动降级 REST，不影响使用。
 
 ### 为什么天气用 Open-Meteo 而不是高德
 
@@ -307,7 +345,7 @@ python -m eval.run_eval --mode real --json report.json   # 导出报告
 ### 验证结果
 
 ```
-pytest                                → 112 passed
+pytest                                → 132 passed
 python -m eval.run_eval --mode mock   → 7 用例，平均 0.875
 python -m eval.run_eval --mode real   → 用例全通过，指标全绿，无警告
 ```

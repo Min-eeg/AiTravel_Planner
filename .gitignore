@@ -43,3 +43,7 @@ __pycache__/
 memory/traces/
 # ===== 本地绘图脚本（生成的 PNG 已入库，脚本不上传）=====
 gen_readme_assets.py
+assets/showcase/*.svg
+
+# ===== 本地联调验证脚本（联调用，不属于交付物）=====
+backend/scripts/
