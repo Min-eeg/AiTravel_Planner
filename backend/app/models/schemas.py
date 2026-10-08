@@ -3,7 +3,7 @@
 这里的结构是前后端共享的契约，改动需同步 frontend/src/types/index.ts。
 """
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 

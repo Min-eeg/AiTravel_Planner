@@ -14,7 +14,6 @@ from fastapi.responses import StreamingResponse
 
 from ...agents.planner import get_trip_planner
 from ...models.schemas import Budget, DayPlan, TripPlan, TripRequest, WeatherInfo
-from ...services.amap_service import get_amap_service
 from ...services.rag_service import get_knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -139,7 +138,6 @@ async def health() -> dict:
     """健康检查，同时暴露依赖可用性便于排查。"""
     from ...core.cache import cache
     from ...core.config import get_settings
-    from ...services.llm_service import get_llm_service
 
     settings = get_settings()
     return {

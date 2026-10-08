@@ -1,6 +1,6 @@
 """评测指标单元测试：纯函数，无网络依赖。"""
 
-from app.models.schemas import Attraction, DayPlan, Location, Meal, TripPlan
+from app.models.schemas import Location
 from eval.metrics import (
     check_attractions_per_day,
     check_budget_consistency,

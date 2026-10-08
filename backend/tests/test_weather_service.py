@@ -120,17 +120,57 @@ async def test_open_meteo_normalizes_precipitation():
 
 
 @pytest.mark.asyncio
-async def test_cache_hit_avoids_second_request():
-    """缓存命中时不应重复发请求。"""
+async def test_cache_hit_avoids_second_request(monkeypatch):
+    """缓存命中时不应重复发请求（用假 HTTP 客户端计数，确定性验证）。"""
+    from app.core.cache import reset_cache
+    from app.services import weather_service as ws_mod
+
+    reset_cache()
     svc = WeatherService()
     svc.settings.weather_provider = "open-meteo"
 
-    args = (30.2596, 120.1487)
-    first = await svc.get_forecast(latitude=args[0], longitude=args[1], city="杭州", days=3)
-    calls_before = svc.call_count if hasattr(svc, "call_count") else None
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
 
-    second = await svc.get_forecast(latitude=args[0], longitude=args[1], city="杭州", days=3)
-    assert len(first) == len(second)
+        def json(self):
+            return {
+                "daily": {
+                    "time": ["2026-08-10"],
+                    "weather_code": [0],
+                    "temperature_2m_max": [30],
+                    "temperature_2m_min": [22],
+                    "precipitation_probability_max": [10],
+                    "precipitation_sum": [0],
+                }
+            }
+
+    class _FakeClient:
+        calls = 0
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, *args, **kwargs):
+            _FakeClient.calls += 1
+            return _FakeResponse()
+
+    monkeypatch.setattr(ws_mod.httpx, "AsyncClient", _FakeClient)
+
+    args = {"latitude": 30.2596, "longitude": 120.1487, "city": "杭州", "days": 3}
+    first = await svc.get_forecast(**args)
+    assert len(first) == 1
+    assert _FakeClient.calls == 1  # 首次查询发 1 次请求
+
+    second = await svc.get_forecast(**args)
+    assert first == second
+    assert _FakeClient.calls == 1  # 第二次命中缓存，零网络请求
 
 
 def test_center_of_candidates():

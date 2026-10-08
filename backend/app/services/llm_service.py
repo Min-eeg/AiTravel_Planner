@@ -11,10 +11,9 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, List, Optional, Type, TypeVar
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel

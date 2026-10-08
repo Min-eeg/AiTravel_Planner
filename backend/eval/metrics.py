@@ -10,7 +10,7 @@
 
 from typing import Any, Dict, List, Tuple
 
-from app.models.schemas import DayPlan, TripPlan, TripRequest
+from app.models.schemas import TripPlan, TripRequest
 
 CheckResult = Tuple[bool, List[str]]
 

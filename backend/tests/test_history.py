@@ -3,7 +3,6 @@
 用临时 SQLite 文件，不污染开发库。
 """
 
-import json
 from pathlib import Path
 
 import pytest
