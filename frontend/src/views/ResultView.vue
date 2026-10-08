@@ -104,7 +104,6 @@ function dayCost(day: DayPlan): number {
     <div v-if="isEmpty" class="empty-state">
       <div class="empty-icon">🗺️</div>
       <h2 class="empty-title">还未生成行程</h2>
-      <p class="empty-desc">填一张表，AI 帮你做一份逐日旅游规划</p>
       <RouterLink to="/" class="empty-btn">去规划 →</RouterLink>
     </div>
 
@@ -339,15 +338,10 @@ function dayCost(day: DayPlan): number {
   line-height: 1;
 }
 .empty-title {
-  margin: 16px 0 0;
+  margin: 16px 0 24px;
   font-size: 18px;
   font-weight: 500;
   color: var(--color-text-primary, #2C2C2A);
-}
-.empty-desc {
-  margin: 8px 0 22px;
-  font-size: 13px;
-  color: #888780;
 }
 .empty-btn {
   display: inline-block;
