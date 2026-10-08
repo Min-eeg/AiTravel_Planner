@@ -39,6 +39,7 @@
 - 🌦️ **多源天气** — Open-Meteo 按景点坐标查询（比城市级更准），三级降级可切换
 - 🗂️ **行程历史持久化** — SQLite 存储 + 内容哈希去重，支持保存 / 查看 / 删除
 - 🧪 **评测闭环** — 8 项指标 + 用例集，量化行程质量，支持 RAG A/B 对比与 CI 门禁
+- 🐳 **一键部署** — Docker Compose 编排前后端，nginx 反代保 SSE 流式，数据卷持久化
 
 ### 与常见 LLM Demo 的差别
 
@@ -184,6 +185,7 @@ ai-trip-planner/
 │   ├── data/kb/               # RAG 城市旅行知识库（Markdown）
 │   ├── eval/                  # 评测闭环（用例集 / 指标 / 运行器）
 │   ├── tests/                 # pytest 单元测试
+│   ├── Dockerfile             # python:3.13-slim，非 root 运行
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/
@@ -193,7 +195,11 @@ ai-trip-planner/
 │   │   ├── stores/            # Pinia：SSE 事件 → 响应式状态
 │   │   ├── services/          # stream（SSE 客户端）· history（历史 API）
 │   │   └── types/             # TypeScript 类型契约
+│   ├── Dockerfile             # 多阶段：node 构建 → nginx 托管
+│   ├── nginx.conf             # 静态托管 + /api 反代（关 proxy_buffering 保 SSE）
 │   └── package.json
+├── docker-compose.yml         # 前后端编排（healthcheck 依赖 + 数据卷）
+├── .github/workflows/ci.yml   # CI：后端 pytest + 前端构建
 ├── assets/showcase/           # README 图片（架构图 / 运行截图）
 └── README.md
 ```
@@ -230,6 +236,18 @@ docker compose up --build
 
 访问 `http://localhost:5273` 即前端；后端 Swagger 调试接口在 `http://localhost:8030/docs`。
 
+**国内构建加速**（默认走官方源，网络不通时传构建参数覆盖，不影响仓库本身）：
+
+```bash
+PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+NPM_REGISTRY=https://registry.npmmirror.com \
+docker compose up --build
+```
+
+Docker Hub 拉不动基础镜像时，在 Docker Desktop → Settings → Docker Engine
+的 `registry-mirrors` 里加国内加速器即可（`Dockerfile` 里写的仍是官方镜像名，
+加速器只作用于本机，不影响他人 clone 后构建）。
+
 容器化时的几个设计决策：
 
 | 决策 | 原因 |
@@ -237,8 +255,18 @@ docker compose up --build
 | 前端多阶段构建（node 构建 → nginx 托管） | 最终镜像只含静态文件，不含 node_modules 和源码 |
 | nginx 反代 `/api` 并**关闭缓冲** | SSE 流式必须关 `proxy_buffering`，否则事件被攒成一次性返回——和 vite dev 代理是同一个坑 |
 | 容器内默认 `MCP_ENABLED=0` | 容器里没有 uvx，起不了 MCP server；POI 检索沿三级降级链自动落到 REST 直连 |
-| 数据库路径用 `DB_PATH` 环境变量注入并挂载卷 | SQLite 写在容器层会随重建丢失，指到 named volume 后行程历史可持久化 |
+| 数据库单独放 `dbdata/`，卷只挂这个目录 | 若把卷挂在 `data/` 上会**遮蔽镜像内的 RAG 知识库**，更新语料后重建镜像不生效；分开挂则静态资源随镜像走、运行时数据随卷走 |
+| 镜像内预建 `dbdata/` 并 `chown` 给非 root 用户 | 新数据卷首次挂载会继承镜像目录的属主；否则 root 属主的卷会让非 root 进程写不进 SQLite |
 | 前端高德 Key 走 build arg | `VITE_` 前缀变量是 vite **构建时**内联的，运行时传环境变量无效 |
+| pip / npm 源做成 build arg | 国内构建可控加速，同时仓库默认仍用官方源，保持通用 |
+
+**实测记录**（Windows + Docker Desktop，WSL2 后端）：
+
+- 镜像构建：前后端合计约 1 分钟（走国内源）
+- 健康检查：`/api/trip/health` 返回 `mock_mode: false`，两个 Key 正确注入容器
+- SSE 流式：经 nginx 反代请求真实行程，10 个事件在 13 秒内**逐条到达**
+  （trace → day → chart → done），确认反代未缓冲
+- 数据持久化：保存行程后 `docker compose down && up` 重建容器，历史记录仍在
 
 ### 前端
 
@@ -367,7 +395,7 @@ python -m eval.run_eval --mode real --json report.json   # 导出报告
 ### 验证结果
 
 ```
-pytest                                → 132 passed
+pytest                                → 134 passed
 python -m eval.run_eval --mode mock   → 7 用例，平均 0.875
 python -m eval.run_eval --mode real   → 用例全通过，指标全绿，无警告
 ```

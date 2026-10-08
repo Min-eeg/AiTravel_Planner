@@ -4,7 +4,11 @@
 # 前置条件：backend/.env 填好 LLM_API_KEY / AMAP_API_KEY（缺失也能跑，自动进 mock 模式）
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      # 国内构建加速：PIP_INDEX_URL=... docker compose build
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     container_name: tuce-backend
     ports:
       - "8030:8030" # 直接暴露，方便访问 Swagger 调试
@@ -17,9 +21,10 @@ services:
       # 三级降级链路在这里派上用场：MCP → REST → mock，关闭上层不影响服务
       MCP_ENABLED: ${MCP_ENABLED:-0}
       # SQLite 指到挂载卷：容器重建不丢已保存的行程历史
-      DB_PATH: /app/data/trip_planner.db
+      DB_PATH: /app/dbdata/trip_planner.db
     volumes:
-      - backend-data:/app/data
+      # 只挂运行时数据目录，别挂 /app/data —— 那会遮蔽镜像内的 RAG 知识库
+      - backend-data:/app/dbdata
     healthcheck:
       # slim 镜像没有 curl，直接用 python 标准库探活
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/api/trip/health', timeout=5)"]
@@ -35,6 +40,8 @@ services:
       # 高德 JS API Key 是浏览器端变量，vite 在构建时内联，必须作为构建参数传入
       args:
         VITE_AMAP_WEB_KEY: ${VITE_AMAP_WEB_KEY:-}
+        # 国内构建加速：NPM_REGISTRY=https://registry.npmmirror.com docker compose build
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
     container_name: tuce-frontend
     ports:
       - "5273:80"
