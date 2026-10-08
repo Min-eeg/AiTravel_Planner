@@ -199,6 +199,7 @@ ai-trip-planner/
 │   ├── nginx.conf             # 静态托管 + /api 反代（关 proxy_buffering 保 SSE）
 │   └── package.json
 ├── docker-compose.yml         # 前后端编排（healthcheck 依赖 + 数据卷）
+├── .env.example               # compose 构建参数（高德 JS Key / 镜像源）
 ├── .github/workflows/ci.yml   # CI：后端 pytest + 前端构建
 ├── assets/showcase/           # README 图片（架构图 / 运行截图）
 └── README.md
@@ -230,11 +231,18 @@ uvicorn app.api.main:app --reload --port 8030
 不想配环境的话，用 Docker Compose 把前后端一起拉起来：
 
 ```bash
-# 前置：backend/.env 填好 Key（缺失也能跑，自动进 mock 模式）
+# 前置 1：backend/.env 填好 Key（缺失也能跑，自动进 mock 模式）
+# 前置 2：根目录 .env 填 VITE_AMAP_WEB_KEY（地图底图用），照着 .env.example 复制
+cp .env.example .env
 docker compose up --build
 ```
 
 访问 `http://localhost:5273` 即前端；后端 Swagger 调试接口在 `http://localhost:8030/docs`。
+
+> **⚠️ 两个 `.env` 别搞混**：`backend/.env` 是后端**运行时**读的；
+> 根目录 `.env` 是给 **compose 构建参数**（`VITE_AMAP_WEB_KEY`、镜像源）用的。
+> compose 不会去读 `frontend/.env` 或 `backend/.env` 来填 build args——
+> 只填了 `frontend/.env` 的话，构建时 Key 是空的，页面会提示「地图加载失败」。
 
 **国内构建加速**（默认走官方源，网络不通时传构建参数覆盖，不影响仓库本身）：
 
