@@ -221,6 +221,20 @@ uvicorn app.api.main:app --reload --port 8030
 > 用内置景点池 + 模板规划跑通完整链路，便于本地开发和 CI 自检。
 > 此时前端页面的地图区域会提示未配置 Key，不影响其他功能。
 
+### 前端
+
+```bash
+cd frontend
+npm install
+npm run dev                     # env 变量已在根目录 .env 配好，无需再复制
+```
+
+访问 `http://localhost:5273`。开发代理已将 `/api` 转发到 `http://localhost:8030`。
+
+> **两个高德 Key 的区别**：`AMAP_API_KEY` 是**服务端** Web 服务类型（调 REST 接口）；
+> `VITE_AMAP_WEB_KEY` 是**浏览器端**类型（加载 JS SDK）。
+> 两者不能互换，用错会报 `10009 USERKEY_PLAT_NOMATCH`。
+
 ### 🐳 Docker 一键启动
 
 不想配环境的话，用 Docker Compose 把前后端一起拉起来：
@@ -243,28 +257,6 @@ docker compose up --build
 | 镜像内预建 `dbdata/` 并 `chown` 给非 root 用户 | 新数据卷首次挂载会继承镜像目录的属主；否则 root 属主的卷会让非 root 进程写不进 SQLite |
 | 前端高德 Key 走 build arg | `VITE_` 前缀变量是 vite **构建时**内联的，运行时传环境变量无效 |
 | pip / npm 源做成 build arg | 国内构建可控加速，同时仓库默认仍用官方源，保持通用 |
-
-**实测记录**（Windows + Docker Desktop，WSL2 后端）：
-
-- 镜像构建：前后端合计约 1 分钟（走国内源）
-- 健康检查：`/api/trip/health` 返回 `mock_mode: false`，两个 Key 正确注入容器
-- SSE 流式：经 nginx 反代请求真实行程，10 个事件在 13 秒内**逐条到达**
-  （trace → day → chart → done），确认反代未缓冲
-- 数据持久化：保存行程后 `docker compose down && up` 重建容器，历史记录仍在
-
-### 前端
-
-```bash
-cd frontend
-npm install
-npm run dev                     # env 变量已在根目录 .env 配好，无需再复制
-```
-
-访问 `http://localhost:5273`。开发代理已将 `/api` 转发到 `http://localhost:8030`。
-
-> **两个高德 Key 的区别**：`AMAP_API_KEY` 是**服务端** Web 服务类型（调 REST 接口）；
-> `VITE_AMAP_WEB_KEY` 是**浏览器端**类型（加载 JS SDK）。
-> 两者不能互换，用错会报 `10009 USERKEY_PLAT_NOMATCH`。
 
 ### ⚠️ Python 版本
 
