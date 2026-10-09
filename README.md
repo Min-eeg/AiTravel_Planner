@@ -260,46 +260,50 @@ docker compose up --build
 含二进制扩展的包（pydantic-core 等）需匹配对应 Python 版本的预编译 wheel，
 换版本时留意。
 
-启动前建议先 `conda deactivate`，避免 conda base 与 venv 双重激活
-（提示符同时出现 `(.venv) (base)` 时，会加载到错误的包）。
-
 ---
 
 ## 🔑 环境变量
 
-全部变量集中写在**项目根目录的 `.env`**（模板见 `.env.example`），后端 / 前端 / compose 共用一份。
+全部变量集中在**项目根目录的 `.env`**，后端 / 前端 / compose 共用一份。
+完整清单（即 `.env.example`）：
 
-| 变量 | 说明 | 缺省行为 |
-|---|---|---|
-| `LLM_API_KEY` | OpenAI 兼容接口 Key（通义/DeepSeek/OpenAI 均可） | 走模板兜底 |
-| `LLM_BASE_URL` | 接口地址 | `https://api.openai.com/v1` |
-| `LLM_MODEL_ID` | 模型名 | `gpt-4o-mini` |
-| `AMAP_API_KEY` | 高德 Web 服务 Key（POI + 地理编码，服务端用；同时透传给 MCP server） | 使用内置 mock 景点池 |
-| `VITE_AMAP_WEB_KEY` | 高德 JS API Key（浏览器端路线图用） | 路线图提示未配置，不影响其他功能 |
-| `MCP_ENABLED` | 置 `0` 关闭 MCP 链路（POI 检索直接走 REST） | `1` |
-| `MCP_SERVER_COMMAND` | MCP server 启动命令（JSON 数组字符串） | uvx 启动 amap-mcp-server（已 pin `pydantic<2.12`） |
-| `MCP_POI_TOOL` | 用于 POI 检索的 MCP 工具名 | `maps_text_search` |
-| `MCP_TIMEOUT` | MCP 单次调用超时（秒） | `30` |
-| `WEATHER_PROVIDER` | 天气数据源：`open-meteo` / `amap` | `open-meteo` |
-| `RAG_ENABLED` | 置 `0` 关闭知识库注入（做 A/B 对比） | `1` |
-| `MOCK_MODE` | 置 `1` 强制 mock | 自动（无 LLM Key 时） |
-| `DB_PATH` | SQLite 文件路径（容器内指到挂载卷） | `backend/trip_planner.db` |
-| `PIP_INDEX_URL` / `NPM_REGISTRY` | 构建镜像时的依赖源（仅 Docker 构建阶段生效） | 官方源 |
+```bash
+# ===== LLM（OpenAI 兼容接口，如通义千问 / DeepSeek / OpenAI）=====
+LLM_API_KEY=sk-your-key-here
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL_ID=qwen-plus
+LLM_TIMEOUT=120
+LLM_MAX_RETRIES=2
 
-> MCP 依赖：`pip install mcp`（已列入 requirements.txt）。未安装或 server 不可用时自动降级 REST，不影响使用。
+# ===== 高德地图 Web 服务 API（服务端用：POI 搜索 / 地理编码）=====
+AMAP_API_KEY=your-amap-key-here
 
-### 为什么天气用 Open-Meteo 而不是高德
+# ===== 天气数据源 =====
+# open-meteo：免费、无需 Key、按经纬度查询
+# amap：需账号开通天气权限，否则返回 10002
+WEATHER_PROVIDER=open-meteo
 
-实测高德天气接口返回 `10002 SERVICE_NOT_AVAILABLE`，
-用两个独立 Key 验证均如此（POI 搜索与地理编码正常），确认是账号级配额限制。
+# ===== MCP（Model Context Protocol：POI 检索的首选链路）=====
+# 置 0 关闭 MCP 链路，POI 检索直接走 REST（容器内默认 0：镜像里没有 uvx）
+MCP_ENABLED=1
+# MCP server 启动命令（JSON 数组字符串）；固定 pydantic<2.12 见下方说明
+MCP_SERVER_COMMAND=["uvx","--from","amap-mcp-server","--with","pydantic<2.12","amap-mcp-server"]
+MCP_POI_TOOL=maps_text_search
 
-Open-Meteo 的优势不只是免费：它支持**按经纬度查询**，
-而高德只接受城市 adcode。本项目已有每个景点的真实坐标，
-因此拿到的天气是景点级的，比城市级更精准。
+# ===== 功能开关 =====
+RAG_ENABLED=1          # 0 = 关闭知识库注入，用于 A/B 对比
+MOCK_MODE=0            # 1 = 强制 mock；无 Key 时自动进入
+CACHE_TTL=3600         # 缓存 TTL（秒）
 
-天气服务设计为多数据源，三级降级：
-`open-meteo（按坐标）→ 高德（按城市名）→ mock`。
-若账号开通高德天气权限，只需把 `WEATHER_PROVIDER` 改成 `amap`，代码零改动。
+# ===== 前端（VITE_ 前缀会打构建进产物，禁止填任何密钥）=====
+VITE_API_BASE_URL=     # 留空则走 vite 开发代理（推荐本地开发）
+VITE_AMAP_WEB_KEY=     # 高德 JS API Key（浏览器端，路线图底图）
+VITE_APP_TITLE=途策智游
+
+# ===== Docker Compose 构建加速（可选）=====
+PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
+NPM_REGISTRY=https://registry.npmmirror.com
+```
 
 ---
 
@@ -310,11 +314,6 @@ Open-Meteo 的优势不只是免费：它支持**按经纬度查询**，
 ```
 {城市}旅行知识库.md
 ```
-
-按 `##` 二级标题分节（城市概况 / 行前准备 / 景点知识 / 美食 / 住宿 / 避坑）。
-**新增城市无需改任何代码**，首次检索时自动加载索引。
-当前覆盖：北京、杭州。重点写"本地经验"（闭馆日、预约要求、避坑），
-而不是景点简介——这样注入提示词才真正提升行程质量。
 
 ---
 
