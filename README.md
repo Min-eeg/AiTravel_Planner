@@ -217,10 +217,6 @@ pip install -r requirements.txt
 uvicorn app.api.main:app --reload --port 8030
 ```
 
-> **没有 API Key 也能跑**：未配置 Key 时自动进入 mock 模式，
-> 用内置景点池 + 模板规划跑通完整链路，便于本地开发和 CI 自检。
-> 此时前端页面的地图区域会提示未配置 Key，不影响其他功能。
-
 ### 前端
 
 ```bash
@@ -260,8 +256,9 @@ docker compose up --build
 
 ### ⚠️ Python 版本
 
-**必须用 3.13 建虚拟环境**。项目依赖 pydantic-core 等含二进制扩展的包，
-3.14 暂无预编译 wheel 会触发源码编译失败；`cpNNN` 二进制包也不能跨小版本复用。
+用 **3.10 ~ 3.13**（推荐 3.13）。项目依赖 pydantic-core 等含二进制扩展的包，
+必须匹配对应 CPython 版本的预编译 wheel——目前没有 3.14 的 wheel，
+用它建环境会触发源码编译失败。
 
 启动前建议先 `conda deactivate`，避免 conda base 与 venv 双重激活
 （提示符同时出现 `(.venv) (base)` 时，会加载到错误的包）。
