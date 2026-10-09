@@ -116,6 +116,24 @@ class MCPClient:
             env["AMAP_MAPS_API_KEY"] = self.settings.amap_api_key
         return env
 
+    def _subprocess_env(self) -> Dict[str, str]:
+        """构造 MCP server 子进程的完整环境，剔除 conda 激活痕迹。
+
+        实测：conda base 处于激活态（CONDA_PREFIX / CONDA_DEFAULT_ENV 被设置、
+        conda 目录被前置进 PATH）时，uvx 启动 server 会超过 30s 触发
+        MCP_TIMEOUT，MCP 链路静默降级 REST；同一命令在未激活的 shell 里
+        5s 内即可建立会话。与其要求用户额外 conda deactivate，不如直接给
+        子进程一个干净环境——MCP server 本身不需要 conda。
+        """
+        env = dict(os.environ)
+        for key in [k for k in env if k.startswith("CONDA")]:
+            env.pop(key, None)
+        if "PATH" in env:
+            env["PATH"] = os.pathsep.join(
+                p for p in env["PATH"].split(os.pathsep) if "conda" not in p.lower()
+            )
+        return env
+
     # ---------- 会话管理 ----------
 
     async def _supervise(self) -> None:
@@ -135,8 +153,7 @@ class MCPClient:
             if not command:
                 raise RuntimeError("MCP_SERVER_COMMAND 未配置或无法解析")
 
-            env = self._server_env()
-            merged = {**os.environ, **env} if env else None
+            merged = {**self._subprocess_env(), **self._server_env()}
             params = StdioServerParameters(
                 command=command[0], args=command[1:], env=merged
             )
