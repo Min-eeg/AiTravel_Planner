@@ -1,7 +1,10 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-pydantic==2.10.4
-python-dotenv==1.0.1
+# 依赖用范围约束而非钉死：含二进制扩展的包（pydantic-core 等）需要匹配
+# 当前 Python 版本的预编译 wheel，钉死旧版会让新 Python 找不到 wheel，
+# 也会与本地已验证的环境脱节。上限只挡大版本（破坏性变更）。
+fastapi>=0.115.6,<1
+uvicorn[standard]>=0.34.0,<1
+pydantic>=2.10.4,<3
+python-dotenv>=1.0.1,<2
 
 # ===== Agent 编排 =====
 langgraph>=0.2.45
@@ -17,14 +20,14 @@ langchain-text-splitters>=0.3.0
 
 # ===== RAG 检索 =====
 # BM25 打分用 rank_bm25（成熟实现，无需自己写）
-rank-bm25==0.2.2
+rank-bm25>=0.2.2
 
 # 中文分词，可选：装了检索更准，不装自动退化为二元组切分。
 # jieba 在 Windows 上偶尔因缺少 C++ 编译工具链装不上，因此不列入必需依赖。
 # 需要时执行：pip install jieba
 
 # ===== HTTP 客户端（调用高德 Web 服务 REST API）=====
-httpx==0.28.1
+httpx>=0.28.1,<1
 
 # ===== 行程历史持久化 =====
 SQLAlchemy>=2.0.36

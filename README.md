@@ -256,9 +256,9 @@ docker compose up --build
 
 ### ⚠️ Python 版本
 
-用 **3.10 ~ 3.13**（推荐 3.13）。项目依赖 pydantic-core 等含二进制扩展的包，
-必须匹配对应 CPython 版本的预编译 wheel——目前没有 3.14 的 wheel，
-用它建环境会触发源码编译失败。
+用 **3.10 ~ 3.13**（推荐 3.13，本地与 CI 均在此版本验证）。依赖中
+含二进制扩展的包（pydantic-core 等）需匹配对应 Python 版本的预编译 wheel，
+换版本时留意。
 
 启动前建议先 `conda deactivate`，避免 conda base 与 venv 双重激活
 （提示符同时出现 `(.venv) (base)` 时，会加载到错误的包）。
