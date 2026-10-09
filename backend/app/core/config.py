@@ -43,9 +43,14 @@ class Settings:
         # ===== MCP（Model Context Protocol）=====
         # mcp_enabled：总开关；MCP server 连接失败时自动降级 REST 直连，不影响可用性
         self.mcp_enabled: bool = os.getenv("MCP_ENABLED", "1") == "1"
-        # server 启动命令（JSON 数组字符串），需与 POI 检索工具名配套
+        # server 启动命令（JSON 数组字符串），需与 POI 检索工具名配套。
+        # 固定 pydantic<2.12：uvx 解析出的 mcp 1.8.x 仍引用
+        # pydantic._internal._typing_extra.eval_type_backport，而该符号自
+        # pydantic 2.12 起已移除，不约束会导致 server 启动即 ImportError、
+        # 静默降级到 REST 链路（表现为「MCP 明明装了却总走 rest」）。
         self.mcp_server_command: str = os.getenv(
-            "MCP_SERVER_COMMAND", '["uvx", "amap-mcp-server"]'
+            "MCP_SERVER_COMMAND",
+            '["uvx", "--from", "amap-mcp-server", "--with", "pydantic<2.12", "amap-mcp-server"]',
         )
         # 用于 POI 检索的 MCP 工具名（amap-mcp-server 的地图搜索工具）
         self.mcp_poi_tool: str = os.getenv("MCP_POI_TOOL", "maps_text_search")

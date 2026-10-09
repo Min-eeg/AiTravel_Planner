@@ -101,13 +101,14 @@
 | 工具发现 | `list_tools()` 自动发现 amap-mcp-server 的 **16 个工具**（含 maps_text_search / maps_weather 等） |
 | 检索计划 | LLM 依据兴趣生成 5 组关键词：`博物馆 / 历史文化街区 / 特色美食街 / 历史古迹 / 安静的公园` |
 | 检索链路 | trace 显示 `链路 mcp`，15 个候选全部来自 MCP 工具调用（真实 POI：南宋德寿宫遗址博物馆、杭州博物馆等） |
-| 坐标补全 | **14/15** 成功（1 个限流后如实保留缺省，由 correct_geo 节点二次兜底） |
+| 坐标补全 | **15/15** 全部命中（多轮实测共 75 次回查零失败；串行 + 0.35s 节流把节奏压在高德个人 Key 的 3 QPS 阈值内） |
 
-联调发现的三个真问题与修复（均已固化为代码与测试）：
+联调发现的四个真问题与修复（均已固化为代码与测试）：
 
 1. **参数类型坑**：amap-mcp-server 的 `citylimit` 要求字符串，传 bool 被 server 端 pydantic 直接拒绝 → 调用参数改为 `"true"`
 2. **坐标与照片缺失**：该 server 的搜索工具只返回 id/name/address（`show_fields` 被忽略）→ 引入「MCP 发现 + REST 回查补全」双链路分工；且回查一次请求同时带回坐标、**真实照片**、地址、票价（最初只回传坐标，导致整趟行程地图气泡全部无图——MCP 候选没有照片字段，REST 回查是补照片的唯一入口）
-3. **QPS 限流**：15 路并发补全触发 `CUQPS_HAS_EXCEEDED_THE_LIMIT`，且失败静默回退 mock 池导致多个景点坐标被污染成同一点 → 信号量压并发 + **请求节流 0.35s**（把节奏压在个人 Key 3 QPS 阈值以内，从"被拒再重试"变成"根本不触发"）+ 退避重试兜底，坐标回查一律 `fallback_mock=False`（宁缺毋假）
+3. **QPS 限流**：最初 15 路并发补全触发 `CUQPS_HAS_EXCEEDED_THE_LIMIT`，且失败静默回退 mock 池导致多个景点坐标被污染成同一点 → 信号量串行化（`Semaphore(1)`）+ **请求节流 0.35s**（把节奏压在个人 Key 3 QPS 阈值以内，从"被拒再重试"变成"根本不触发"）+ 退避重试兜底，坐标回查一律 `fallback_mock=False`（宁缺毋假）
+4. **MCP 依赖解析冲突（静默失效）**：uvx 为 amap-mcp-server 解析出 `mcp 1.8.x + pydantic 2.14`，而前者仍引用 `pydantic._internal._typing_extra.eval_type_backport`（该符号自 pydantic 2.12 起已移除）→ server 启动即 `ImportError`，链路**静默降级 REST**：不报错、功能可用，但 MCP 实际从未生效 → 启动命令固定 `--with pydantic<2.12`，trace 的「链路」字段可直接暴露该状态
 
 > 实测数据来自真实链路（非 mock）。复现：装好 `mcp` 包，在根目录 `.env` 配好 `AMAP_API_KEY` 与 `LLM_API_KEY`，生成一次行程即可在 trace 中看到同等数据（联调脚本未入库）。容器环境默认 `MCP_ENABLED=0`，POI 检索自动沿降级链走 REST
 
