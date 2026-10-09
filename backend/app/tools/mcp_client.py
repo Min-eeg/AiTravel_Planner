@@ -150,7 +150,15 @@ class MCPClient:
             self._session = session
             logger.info("MCP 会话已建立：%s", command[0])
         except Exception as exc:
-            logger.warning("MCP 会话启动失败：%s", exc)
+            # 用类型名 + repr 而不是 str()：mcp SDK 抛出的 ExceptionGroup 等
+            # 异常 str() 为空，只打 exc 会出现「启动失败：」后一片空白，无从排查。
+            # 同时带上实际命令，便于确认用到的是哪条 server 启动命令。
+            logger.warning(
+                "MCP 会话启动失败：%s: %r（命令：%s）",
+                type(exc).__name__,
+                exc,
+                " ".join(command) if command else "?",
+            )
         finally:
             # 无论成败都通知等待方；等待方通过 self._session 判断结果
             self._ready.set()
