@@ -103,15 +103,6 @@
 | 检索链路 | trace 显示 `链路 mcp`，15 个候选全部来自 MCP 工具调用（真实 POI：南宋德寿宫遗址博物馆、杭州博物馆等） |
 | 坐标补全 | **15/15** 全部命中（多轮实测共 75 次回查零失败；串行 + 0.35s 节流把节奏压在高德个人 Key 的 3 QPS 阈值内） |
 
-联调发现的四个真问题与修复（均已固化为代码与测试）：
-
-1. **参数类型坑**：amap-mcp-server 的 `citylimit` 要求字符串，传 bool 被 server 端 pydantic 直接拒绝 → 调用参数改为 `"true"`
-2. **坐标与照片缺失**：该 server 的搜索工具只返回 id/name/address（`show_fields` 被忽略）→ 引入「MCP 发现 + REST 回查补全」双链路分工；且回查一次请求同时带回坐标、**真实照片**、地址、票价（最初只回传坐标，导致整趟行程地图气泡全部无图——MCP 候选没有照片字段，REST 回查是补照片的唯一入口）
-3. **QPS 限流**：最初 15 路并发补全触发 `CUQPS_HAS_EXCEEDED_THE_LIMIT`，且失败静默回退 mock 池导致多个景点坐标被污染成同一点 → 信号量串行化（`Semaphore(1)`）+ **请求节流 0.35s**（把节奏压在个人 Key 3 QPS 阈值以内，从"被拒再重试"变成"根本不触发"）+ 退避重试兜底，坐标回查一律 `fallback_mock=False`（宁缺毋假）
-4. **MCP 依赖解析冲突（静默失效）**：uvx 为 amap-mcp-server 解析出 `mcp 1.8.x + pydantic 2.14`，而前者仍引用 `pydantic._internal._typing_extra.eval_type_backport`（该符号自 pydantic 2.12 起已移除）→ server 启动即 `ImportError`，链路**静默降级 REST**：不报错、功能可用，但 MCP 实际从未生效 → 启动命令固定 `--with pydantic<2.12`，trace 的「链路」字段可直接暴露该状态
-
-> 实测数据来自真实链路（非 mock）。复现：装好 `mcp` 包，在根目录 `.env` 配好 `AMAP_API_KEY` 与 `LLM_API_KEY`，生成一次行程即可在 trace 中看到同等数据（联调脚本未入库）。容器环境默认 `MCP_ENABLED=0`，POI 检索自动沿降级链走 REST
-
 ### SSE 事件流
 
 ![SSE 事件流](assets/showcase/sse-events.png)
@@ -165,8 +156,6 @@
 | 显示「游览 2 分钟」 | 单位不明确，模型填了小时数 | schema 写明单位 + 后端 `_sane_duration()` 夹取 |
 | 每天吃一模一样的饭 | LLM 看不到前几天的产出，逐日生成时每天复制同一份菜单（实测北京 2 天都是护国寺小吃 + 烤鸭 + 炸酱面） | 前几日餐食注入提示词并禁止重复 + 评审 Agent 新增「跨天重复」硬规则（≥2 餐雷同打回） |
 
-> 这些偏差都已固化为单元测试（`tests/test_drafts.py`），防止后续换模型时静默回归。
-
 ---
 
 ## 📁 项目结构
@@ -215,13 +204,6 @@ ai-trip-planner/
 cp .env.example .env            # 在项目根目录执行，填入自己的 Key
 ```
 
-`.env` 只放**项目根目录一份**，三处共用：后端（`config.py` 显式加载）、
-前端（`vite.config.ts` 的 `envDir` 指向根目录）、docker compose（`env_file` + build args）。
-
-> 为了做到这一点，前端设置了 `envDir`、后端按路径查找 `.env`——
-> vite 和 python-dotenv 的默认行为都不满足「单一配置源」：vite 只读 frontend/ 下的，
-> 而 build arg 更是只能从根目录读。集中一份能避免"改了 A 忘了 B"的配置漂移。
-
 ### 后端
 
 ```bash
@@ -249,24 +231,6 @@ docker compose up --build
 ```
 
 访问 `http://localhost:5273` 即前端；后端 Swagger 调试接口在 `http://localhost:8030/docs`。
-
-> **为什么 `VITE_AMAP_WEB_KEY` 必须写在根目录 `.env`**：compose 的 build args
-> 只能从项目根目录的 `.env` 插值，它不会读子目录里的 env 文件。
-> 而 `VITE_` 变量是 vite **构建时**内联进产物的，运行时再注入无效——
-> 所以这个 Key 必须在构建阶段就传进去，否则页面提示「地图加载失败」。
-
-**国内构建加速**（写在根目录 `.env` 里即可，或临时用环境变量覆盖）：
-
-```bash
-# .env 中已含以下两行，不需要额外操作；命令行覆盖示例：
-PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
-NPM_REGISTRY=https://registry.npmmirror.com \
-docker compose up --build
-```
-
-Docker Hub 拉不动基础镜像时，在 Docker Desktop → Settings → Docker Engine
-的 `registry-mirrors` 里加国内加速器即可（`Dockerfile` 里写的仍是官方镜像名，
-加速器只作用于本机，不影响他人 clone 后构建）。
 
 容器化时的几个设计决策：
 
@@ -324,7 +288,7 @@ npm run dev                     # env 变量已在根目录 .env 配好，无需
 | `AMAP_API_KEY` | 高德 Web 服务 Key（POI + 地理编码，服务端用；同时透传给 MCP server） | 使用内置 mock 景点池 |
 | `VITE_AMAP_WEB_KEY` | 高德 JS API Key（浏览器端路线图用） | 路线图提示未配置，不影响其他功能 |
 | `MCP_ENABLED` | 置 `0` 关闭 MCP 链路（POI 检索直接走 REST） | `1` |
-| `MCP_SERVER_COMMAND` | MCP server 启动命令（JSON 数组字符串） | `["uvx", "amap-mcp-server"]` |
+| `MCP_SERVER_COMMAND` | MCP server 启动命令（JSON 数组字符串） | uvx 启动 amap-mcp-server（已 pin `pydantic<2.12`） |
 | `MCP_POI_TOOL` | 用于 POI 检索的 MCP 工具名 | `maps_text_search` |
 | `MCP_TIMEOUT` | MCP 单次调用超时（秒） | `30` |
 | `WEATHER_PROVIDER` | 天气数据源：`open-meteo` / `amap` | `open-meteo` |
